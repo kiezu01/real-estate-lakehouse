@@ -18,7 +18,7 @@ ua = UserAgent()  # initialize UserAgent once
 base_url = 'https://www.nhatot.com'
 
 def input_file():
-    return os.path.join(directory, 'urls_test.csv')
+    return os.path.join(directory, 'urls.csv')
 
 def extract_urls(start_row, end_row):
     list_of_urls = pd.read_csv(input_file(), header=None, names=['url'])
@@ -29,7 +29,7 @@ def extract_urls(start_row, end_row):
 
 def output_file(data_type):
     if data_type == 'data':
-        return os.path.join(directory, 'house_info_test.csv')
+        return os.path.join(directory, 'house_info.csv')
     elif data_type == 'error':
         return os.path.join(directory, 'error_links.csv')
     
