@@ -1,85 +1,128 @@
-import requests
-from bs4 import BeautifulSoup
-import pandas as pd
+import concurrent.futures
 import time
-import random
+import pandas as pd
+import requests
+import os
+import logging
+from datetime import datetime
+from bs4 import BeautifulSoup
 from fake_useragent import UserAgent
-start_time = time.time()
+import random
 
-# Function to scrape data from a single URL
-def scrape_url(link):
+# logging configuration
+logging.basicConfig(filename='crawler.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# define the necessary variables
+directory = 'crawler/data/'
+ua = UserAgent()  # initialize UserAgent once
+base_url = 'https://www.nhatot.com'
+
+def input_file():
+    return os.path.join(directory, 'urls_test.csv')
+
+def extract_urls(start_row, end_row):
+    list_of_urls = pd.read_csv(input_file(), header=None, names=['url'])
+    urls = list_of_urls['url'][start_row:end_row].tolist()
+    # Concatenate base URL if necessary
+    urls = [url if url.startswith('http://') or url.startswith('https://') else f'{base_url}/{url}' for url in urls]
+    return urls
+
+def output_file(data_type):
+    if data_type == 'data':
+        return os.path.join(directory, 'house_info_test.csv')
+    elif data_type == 'error':
+        return os.path.join(directory, 'error_links.csv')
+    
+def extract_id(url):
+    return url.split('/')[-1].split('.')[0]
+
+def polite_request(url):
+    headers = {'User-Agent': ua.random}
     try:
-        ua = UserAgent()
-        user_agent = ua.random
-        headers = {'User-Agent': user_agent}
-        response = requests.get(link, headers=headers)
-        response.raise_for_status()  # raise an exception for HTTP errors (4xx or 5xx)
+        time.sleep(random.randint(1, 3))
+        response = requests.get(url, headers=headers)
+        if response.status_code == 429:
+            sleep_time = int(response.headers.get("Retry-After", 15))
+            logging.info(f"Rate limit exceeded. Sleeping for {sleep_time} seconds.")
+            time.sleep(sleep_time)
+            return polite_request(url)
+        return response
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Request failed: {e}")
+        return None
+
+def scrape_url(link):
+    response = polite_request(link)
+    if response and response.status_code == 200:
         soup = BeautifulSoup(response.content, 'html.parser')
-        house_info = soup.find('div', class_='DetailView_adviewCointainer__rdzwn')
-
-        # fetch data
+        house_info = soup.find('div', class_='DetailView_adviewCointainer__rdzwn')  # Adjust class as needed
         if house_info:
+            house_id = extract_id(link)
             house = {
-                'house_name': house_info.find('h1', class_='AdDecriptionVeh_adTitle__vEuKD').text.strip() if house_info.find('h1', class_='AdDecriptionVeh_adTitle__vEuKD') else "",
-                'address': house_info.find('span', class_='fz13').text.replace('Xem bản đồ', '').strip() if house_info.find('span', class_='fz13') else "",
-                'price': house_info.find('span', itemprop='price').text.split('-')[0].strip() if house_info.find('span', itemprop='price') else "",
-                'area': house_info.find('span', itemprop='size').text.strip() if house_info.find('span', itemprop='size') else "",
-                'length': house_info.find('span', itemprop='length').text.strip() if house_info.find('span', itemprop='length') else "",
-                'width': house_info.find('span', itemprop='width').text.strip() if house_info.find('span', itemprop='width') else "",
-                'price_per_square': house_info.find('span', itemprop='price_m2').text.strip() if house_info.find('span', itemprop='price_m2') else "",
-                'bedroom': house_info.find('span', itemprop='rooms').text.strip() if house_info.find('span', itemprop='rooms') else "",
-                'floor': house_info.find('span', itemprop='floors').text.strip() if house_info.find('span', itemprop='floors') else "",
-                'toilet': house_info.find('span', itemprop='toilets').text.strip() if house_info.find('span', itemprop='toilets') else "",
-                'house_type': house_info.find('span', itemprop='house_type').text.strip() if house_info.find('span', itemprop='house_type') else "",
-                'furnishing_status': house_info.find('span', itemprop='furnishing_sell').text.strip() if house_info.find('span', itemprop='furnishing_sell') else "",
-                'legal_status': house_info.find('span', itemprop='property_legal_document').text.strip() if house_info.find('span', itemprop='property_legal_document') else "",
-                'priority_characteristics': house_info.find('span', itemprop='pty_characteristics').text.strip() if house_info.find('span', itemprop='pty_characteristics') else "",
-                'living_size': house_info.find('span', itemprop='living_size').text.strip() if house_info.find('span', itemprop='living_size') else "",
-                'direction': house_info.find('span', itemprop='direction').text.strip() if house_info.find('span', itemprop='direction') else ""
+                # Extract information from the page
+                    'id': house_id,
+                    'link': link,
+                    'house_name': house_info.find('h1', class_='AdDecriptionVeh_adTitle__vEuKD').text.strip() if house_info.find('h1', class_='AdDecriptionVeh_adTitle__vEuKD') else "",
+                    'address': house_info.find('span', class_='fz13').text.replace('Xem bản đồ', '').strip() if house_info.find('span', class_='fz13') else "",
+                    'price': house_info.find('span', itemprop='price').text.split('-')[0].strip() if house_info.find('span', itemprop='price') else "",
+                    'area': house_info.find('span', itemprop='size').text.strip() if house_info.find('span', itemprop='size') else "",
+                    'length': house_info.find('span', itemprop='length').text.strip() if house_info.find('span', itemprop='length') else "",
+                    'width': house_info.find('span', itemprop='width').text.strip() if house_info.find('span', itemprop='width') else "",
+                    'price_per_square': house_info.find('span', itemprop='price_m2').text.strip() if house_info.find('span', itemprop='price_m2') else "",
+                    'bedroom': house_info.find('span', itemprop='rooms').text.strip() if house_info.find('span', itemprop='rooms') else "",
+                    'floor': house_info.find('span', itemprop='floors').text.strip() if house_info.find('span', itemprop='floors') else "",
+                    'toilet': house_info.find('span', itemprop='toilets').text.strip() if house_info.find('span', itemprop='toilets') else "",
+                    'house_type': house_info.find('span', itemprop='house_type').text.strip() if house_info.find('span', itemprop='house_type') else "",
+                    'furnishing_status': house_info.find('span', itemprop='furnishing_sell').text.strip() if house_info.find('span', itemprop='furnishing_sell') else "",
+                    'legal_status': house_info.find('span', itemprop='property_legal_document').text.strip() if house_info.find('span', itemprop='property_legal_document') else "",
+                    'priority_characteristics': house_info.find('span', itemprop='pty_characteristics').text.strip() if house_info.find('span', itemprop='pty_characteristics') else "",
+                    'living_size': house_info.find('span', itemprop='living_size').text.strip() if house_info.find('span', itemprop='living_size') else "",
+                    'direction': house_info.find('span', itemprop='direction').text.strip() if house_info.find('span', itemprop='direction') else "",
+                    'crawl_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                
             }
-
-            print("Scraping:", link)
-            
-            # return data and error code
+            logging.info("Scraping successful: %s", link)
             return house, None
         else:
-            print(f"No house information found for {link}")
+            logging.warning("No house information found for %s", link)
             return None, 404
-    except requests.exceptions.HTTPError as e:
-        print(f"HTTP error {e.response.status_code} occurred while scraping {link}: {e.response.reason}")
-        return None, e.response.status_code
-    finally:
-        time.sleep(random.randint(1, 3))
-        
-# Base URL
-url = 'https://www.nhatot.com'
-
-start_row = 0
-end_row = 1000
-# read file
-list_of_urls = pd.read_csv('crawler/data/urls_test.csv', header=None, names=['url'])
-
-selected_urls = list_of_urls[start_row:end_row]
-# Create a list of URLs by concatenating the base URL with the path
-new_links = [url + path for path in selected_urls['url']]
-
-# Scrape each URL one by one using requests
-data_list = []
-error_links = []
-for link in new_links:
-    result, error_code = scrape_url(link)
-    if result is not None:
-        data_list.append(result)
+    elif response:
+        logging.error("Failed to fetch page %s, status code: %s", link, response.status_code)
+        return None, response.status_code
     else:
-        error_links.append((link, error_code))
+        return None, "Failed to make a request"
 
-# Save data to CSV
-df_house_info = pd.DataFrame(data_list, columns=['House Name', 'Address', 'Price', 'Area', 'Length', 'Width', 'Price Per Square', 'Bedroom', 'Floor', 'Toilet', 'House Type', 'Furnishing Status', 'Legal Status', 'Priority Characteristics', 'Living Size', 'Direction'])
-df_house_info.to_csv('crawler/data/house_info.csv',mode='a', index=False, encoding='utf-8-sig')
+def process_url(link):
+    result, error_code = scrape_url(link)
+    return result if result else {'link': link, 'error_code': error_code}
 
-# Save error links to CSV
-df_errors = pd.DataFrame(error_links, columns=['Error Link', 'Error Code'])
-df_errors.to_csv('crawler/data/error_links.csv',mode='a', index=False, encoding='utf-8-sig')
+def scrape_multiple_urls(urls, max_workers=5):
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(process_url, url) for url in urls]
+        results = []
+        errors = []
+        for future in concurrent.futures.as_completed(futures):
+            data = future.result()
+            if 'error_code' in data:
+                errors.append(data)
+            else:
+                results.append(data)
+        return results, errors
 
-print('Done!')
-print("---processing times completed in %s seconds ---" % (time.time() - start_time))
+def save_to_csv(data, file_path, mode='a', header=False):
+    df = pd.DataFrame(data)
+    df.to_csv(file_path, mode=mode, index=False, header=header)
+
+def main():
+    start_time = time.time()
+    urls = extract_urls(1000, 1100)  # update the range of URLs to extract
+
+    data_list, error_links = scrape_multiple_urls(urls)
+    save_to_csv(data_list, output_file('data'), header=not os.path.exists(output_file('data')))
+    save_to_csv(error_links, output_file('error'), header=not os.path.exists(output_file('error')))
+
+    print('Done!')
+    print("---processing times completed in %s seconds ---" % (time.time() - start_time))
+
+if __name__ == "__main__":
+    main()
