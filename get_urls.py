@@ -78,8 +78,8 @@ def main():
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     
     # Define start and end page
-    start_page = 1
-    end_page = 2
+    start_page = 201
+    end_page = 1000
     
     process_pages(start_page, end_page)
     logging.info("Duplicates dropped successfully and file saved")
